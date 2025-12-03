@@ -1,81 +1,57 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import joblib
 import pandas as pd
-import pickle
-import logging
+import os
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-
-# Load the trained model
-model = None
+# Load the trained pipeline
+# Ensure fertilizer_pipeline.pkl is in the same directory
 try:
-    with open('fmodel.pkl', 'rb') as f:
-        model = pickle.load(f)
-    logging.info("Model loaded successfully.")
+    model = joblib.load('fertilizer_pipeline.pkl')
+    print("Model loaded successfully.")
 except Exception as e:
-    logging.error(f"Failed to load model: {str(e)}")
+    print(f"Error loading model: {e}")
     model = None
 
 @app.route('/', methods=['GET'])
 def home():
-    if model is None:
-        return jsonify({
-            "status": "error", 
-            "message": "Model not loaded. Check server logs."
-        }), 500
-    return jsonify({
-        "status": "healthy", 
-        "message": "Fertilizer Prediction API is running."
-    })
+    return "Fertilizer Prediction API is Running!"
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    if model is None:
-        return jsonify({"success": False, "error": "Model not loaded on server"}), 500
+    if not model:
+        return jsonify({'error': 'Model not loaded'}), 500
     
     try:
-        # Handle both JSON and Form data
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = request.form.to_dict()
-
-        # Input validation
-        required_fields = ['Temparature', 'Humidity', 'Moisture', 'Soil Type', 'Crop Type', 'Nitrogen', 'Potassium', 'Phosphorous']
-        missing = [f for f in required_fields if f not in data]
-        if missing:
-            return jsonify({"success": False, "error": f"Missing fields: {missing}"}), 400
-
-        # Prepare input data matching training columns
-        input_data = {
-            'Temparature': [int(data.get('Temparature'))],
-            'Humidity': [int(data.get('Humidity'))],
-            'Moisture': [int(data.get('Moisture'))],
-            'Soil Type': [str(data.get('Soil Type')).strip()],
-            'Crop Type': [str(data.get('Crop Type')).strip()],
-            'Nitrogen': [int(data.get('Nitrogen'))],
-            'Potassium': [int(data.get('Potassium'))],
-            'Phosphorous': [int(data.get('Phosphorous'))]
-        }
+        data = request.get_json()
         
-        input_df = pd.DataFrame(input_data)
+        # Expecting JSON like:
+        # {
+        #   "Temparature": 26,
+        #   "Humidity": 52,
+        #   "Moisture": 38,
+        #   "Soil Type": "Sandy",
+        #   "Crop Type": "Maize",
+        #   "Nitrogen": 37,
+        #   "Potassium": 0,
+        #   "Phosphorous": 0
+        # }
         
-        # Make prediction
+        # Convert dict to DataFrame (required by the pipeline)
+        input_df = pd.DataFrame([data])
+        
+        # Predict
         prediction = model.predict(input_df)[0]
         
-        return jsonify({
-            "success": True,
-            "prediction": prediction
-        })
-
-    except ValueError as e:
-        return jsonify({"success": False, "error": "Invalid input type. Ensure numeric values are correct.", "details": str(e)}), 400
+        return jsonify({'prediction': prediction})
+    
     except Exception as e:
-        return jsonify({"success": False, "error": f"Prediction failed: {str(e)}"}), 500
+        return jsonify({'error': str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Render assigns a PORT via environment variable
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
